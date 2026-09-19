@@ -18,62 +18,82 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y erofs-utils wget tar
+          sudo apt-get install -y erofs-utils wget tar android-sdk-libsparse-utils
+          # lpunpack comes from Android's build tools; grab a static prebuilt
+          wget -q -O lpunpack https://github.com/unix3dgforce/lpunpack/releases/latest/download/lpunpack
+          chmod +x lpunpack || true
+          pip3 install lpunpack 2>/dev/null || true
 
       - name: Download and extract fastboot ROM
         run: |
           wget -q -O rom.tgz "$ROM_URL"
           mkdir -p rom_extracted
           tar -xf rom.tgz -C rom_extracted
-          echo "----- All .img files -----"
           find rom_extracted -iname "*.img" | sort
+
+      - name: Convert sparse super.img if needed and unpack
+        run: |
+          SUPER=$(find rom_extracted -iname "super.img" | head -1)
+          echo "Found super.img at: $SUPER"
+          file "$SUPER"
+          mkdir -p super_unpacked
+
+          # Detect sparse image and convert to raw if needed
+          if file "$SUPER" | grep -qi "sparse"; then
+            echo "Sparse image detected, converting..."
+            simg2img "$SUPER" super_raw.img
+            SUPER_RAW="super_raw.img"
+          else
+            SUPER_RAW="$SUPER"
+          fi
+
+          # Try lpunpack (python package provides lpunpack CLI)
+          python3 -m lpunpack "$SUPER_RAW" super_unpacked || \
+          ./lpunpack "$SUPER_RAW" super_unpacked || \
+          echo "lpunpack failed - check logs above"
+
+          echo "----- Unpacked logical partitions -----"
+          find super_unpacked -type f
 
       - name: Extract EROFS partitions
         run: |
           mkdir -p tree/system tree/system_ext tree/product tree/vendor
           for part in system system_ext product vendor; do
-            IMG=$(find rom_extracted -iname "${part}.img" | head -1)
+            IMG=$(find super_unpacked -iname "${part}.img" -o -iname "${part}_a.img" | head -1)
             if [ -n "$IMG" ]; then
               echo "Extracting $part from $IMG"
               fsck.erofs --extract="tree/$part" "$IMG"
             else
-              echo "No $part.img found"
+              echo "No $part image found in super_unpacked"
             fi
           done
-          find rom_extracted -iname "vbmeta*.img"
 
       - name: Locate target app folders
         run: |
           echo "===== Searching for MiuiHome (launcher) ====="
-          find tree -iname "*MiuiHome*" -maxdepth 6
-
+          find tree -iname "*MiuiHome*"
           echo "===== Searching for SecurityCenter ====="
-          find tree -iname "*SecurityCenter*" -maxdepth 6
-
+          find tree -iname "*SecurityCenter*"
           echo "===== Searching for PersonalAssistant / AppVault ====="
-          find tree -iname "*PersonalAssistant*" -maxdepth 6
-          find tree -iname "*AppVault*" -maxdepth 6
-
+          find tree -iname "*PersonalAssistant*"
+          find tree -iname "*AppVault*"
           echo "===== Searching for XiaomiEUExt ====="
-          find tree -iname "*XiaomiEUExt*" -maxdepth 6
+          find tree -iname "*XiaomiEUExt*"
 
-      - name: Check privapp_whitelist files (confirms package identity)
+      - name: Check privapp_whitelist files
         run: |
-          echo "===== privapp_whitelist for com.miui.home ====="
           find tree -iname "privapp_whitelist_com.miui.home*"
-          echo "===== privapp_whitelist for com.miui.securitycenter ====="
           find tree -iname "privapp_whitelist_com.miui.securitycenter*"
-          echo "===== privapp_whitelist for com.miui.personalassistant ====="
           find tree -iname "privapp_whitelist_com.miui.personalassistant*"
 
-      - name: Dump directory tree of priv-app folders (top-level only)
+      - name: Dump priv-app folder listings
         run: |
           for part in system system_ext product; do
-            echo "===== tree/$part/*/priv-app ====="
+            echo "===== tree/$part priv-app ====="
             find "tree/$part" -maxdepth 3 -type d -iname "priv-app" -exec ls -la {} \;
           done
 
-      - name: Show sizes for sanity check
+      - name: Show sizes
         run: |
-          du -sh tree/system tree/system_ext tree/product 2>/dev/null
+          du -sh tree/* 2>/dev/null
           df -h
