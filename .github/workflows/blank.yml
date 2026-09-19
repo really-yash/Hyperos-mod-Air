@@ -6,6 +6,7 @@ on:
 env:
   ROM_URL: "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS2.0.208.0.VGQINXM/air_in_global_images_OS2.0.208.0.VGQINXM_20260804.0000.00_15.0_in_35b733efaa.tgz"
 
+# This is the magic spell that keeps the queue fast! OwO
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -13,7 +14,7 @@ concurrency:
 jobs:
   uwu_recon:
     name: (✿◠‿◠) HyperOS Recon Job
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: 🧹 (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧ Sweeping disk space OwO
         run: |
@@ -25,7 +26,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y erofs-utils wget tar android-sdk-libsparse-utils
           
-          # The old erfanoabdi repo died! 😭 Using a permanent commit mirror (ó﹏ò｡)
+          # Using the permanent commit mirror for lpunpack! (ó﹏ò｡)
           wget -q https://raw.githubusercontent.com/Exynos-nibba/lpunpack-lpmake-mirror/d0f9da322b764871e54072d1b3e9d67c09cd715c/binary/lpunpack -O lpunpack
           chmod +x lpunpack
           sudo mv lpunpack /usr/local/bin/
