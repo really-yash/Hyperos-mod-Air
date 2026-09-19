@@ -24,8 +24,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y erofs-utils wget tar android-sdk-libsparse-utils
-          # Downloading a pre-built lpunpack binary instead of pip (ó﹏ò｡)
-          wget -q https://raw.githubusercontent.com/erfanoabdi/Firmware_extractor/master/tools/lpunpack
+          
+          # The old erfanoabdi repo died! 😭 Using a permanent commit mirror (ó﹏ò｡)
+          wget -q https://raw.githubusercontent.com/Exynos-nibba/lpunpack-lpmake-mirror/d0f9da322b764871e54072d1b3e9d67c09cd715c/binary/lpunpack -O lpunpack
           chmod +x lpunpack
           sudo mv lpunpack /usr/local/bin/
           lpunpack --help || echo "lpunpack check done 🌸"
@@ -52,7 +53,6 @@ jobs:
             SUPER_RAW="$SUPER"
           fi
 
-          # Using the new binary! 
           lpunpack "$SUPER_RAW" super_unpacked
 
           echo "----- Unpacked logical partitions (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧ -----"
