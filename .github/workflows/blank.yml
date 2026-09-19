@@ -8,7 +8,7 @@ env:
 
 jobs:
   recon:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Free disk space
         run: |
@@ -18,8 +18,10 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y erofs-utils wget tar android-sdk-libsparse-utils python3-pip
-          pip3 install lpunpack
+          sudo apt-get install -y erofs-utils wget tar android-sdk-libsparse-utils
+          wget -q https://raw.githubusercontent.com/Exynos-nibba/lpunpack-lpmake-mirror/d0f9da322b764871e54072d1b3e9d67c09cd715c/binary/lpunpack -O lpunpack
+          chmod +x lpunpack
+          sudo mv lpunpack /usr/local/bin/
 
       - name: Download and extract fastboot ROM
         run: |
@@ -37,7 +39,8 @@ jobs:
           else
             SUPER_RAW="$SUPER"
           fi
-          python3 -m lpunpack "$SUPER_RAW" super_unpacked
+          # Run the binary directly instead of calling python3 -m
+          lpunpack "$SUPER_RAW" super_unpacked
 
       - name: Extract EROFS partitions
         run: |
