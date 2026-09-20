@@ -1,4 +1,4 @@
-name: 🕵️ Greeshan HyperOS 2 Deep Audit
+name: 🕵️ Greeshan HyperOS 2 Deep Audit (Targeted)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,6 @@ on:
       rom_url:
         description: 'Target ROM URL'
         required: true
-        # Cleaned SourceForge URL (No IP locks or session tokens!)
         default: 'https://downloads.sourceforge.net/project/miui-greeshan-repack/HyperOS2/Redmi-13C-air/greeshan.by_Redmi13C_5G_air_OS2.0.208.0.VGQINXM_15.0_99c03.zip'
 
 concurrency:
@@ -24,7 +23,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y erofs-utils wget unzip android-sdk-libsparse-utils file
           
-          # Dropped lpdump. We will rely on lpunpack and manual math!
           BASE_URL="https://raw.githubusercontent.com/Exynos-nibba/lpunpack-lpmake-mirror/d0f9da322b764871e54072d1b3e9d67c09cd715c/binary"
           wget -q $BASE_URL/lpunpack -O lpunpack
           chmod +x lpunpack
@@ -33,7 +31,6 @@ jobs:
       - name: "📥 Download & Unpack Target ROM"
         run: |
           mkdir -p rom_extracted forensics_output
-          # Added --trust-server-names and --max-redirect to safely handle SourceForge CDN routing
           wget -q --show-progress --trust-server-names --max-redirect=10 -O target_rom.zip "${{ github.event.inputs.rom_url }}"
           unzip -q target_rom.zip -d rom_extracted || true
 
@@ -46,38 +43,44 @@ jobs:
             echo -e "\n\n" >> forensics_output/1_flash_scripts.txt
           done
 
-      - name: "🔥 Audit 2 - Super Structure & Logical Boundaries"
+      - name: "🔥 Audit 2 - Target greeshan.img & Logical Super Structure"
         run: |
-          echo "=== Super Metadata & Partition Sizes ===" > forensics_output/2_super_structure.txt
-          SUPER=$(find rom_extracted -iname "super*.img" | head -1)
+          echo "=== Locating Super/Greeshan Container ===" > forensics_output/2_super_structure.txt
           
-          if [ -n "$SUPER" ]; then
-            if file "$SUPER" | grep -qi "sparse"; then
-              simg2img "$SUPER" super_raw.img
-              SUPER_TARGET="super_raw.img"
+          # Match greeshan.img or any super image inside subdirectories
+          SUPER_PATH=$(find rom_extracted -iname "greeshan.img" -o -iname "super.img" -o -iname "*super*.img" | head -1)
+          echo "Identified container: $SUPER_PATH" >> forensics_output/2_super_structure.txt
+          
+          if [ -n "$SUPER_PATH" ]; then
+            ls -lh "$SUPER_PATH" >> forensics_output/2_super_structure.txt
+            
+            # Check sparse header and decompress if necessary
+            if file "$SUPER_PATH" | grep -qi "sparse"; then
+              echo "Format: Sparse Image (Converting to Raw...)" >> forensics_output/2_super_structure.txt
+              simg2img "$SUPER_PATH" super_raw.img
+              TARGET_IMAGE="super_raw.img"
             else
-              SUPER_TARGET="$SUPER"
+              echo "Format: Raw Ext4/EROFS Super" >> forensics_output/2_super_structure.txt
+              TARGET_IMAGE="$SUPER_PATH"
             fi
             
-            # Since we dropped lpdump, we directly unpack and measure the logical partitions
             mkdir -p super_unpacked
-            lpunpack "$SUPER_TARGET" super_unpacked || true
+            lpunpack "$TARGET_IMAGE" super_unpacked
             
-            echo -e "\n=== Extracted Logical Image Sizes (Bytes) ===" >> forensics_output/2_super_structure.txt
-            ls -lh super_unpacked/*.img >> forensics_output/2_super_structure.txt || true
-            
-            echo -e "\n=== Total Logical Blueprint Size ===" >> forensics_output/2_super_structure.txt
-            du -ch super_unpacked/*.img | grep total >> forensics_output/2_super_structure.txt || true
+            echo -e "\n=== Extracted Logical Partitions ===" >> forensics_output/2_super_structure.txt
+            ls -lh super_unpacked/ >> forensics_output/2_super_structure.txt
           else
-            echo "No super.img found directly. Checking top-level images..." >> forensics_output/2_super_structure.txt
-            ls -lh rom_extracted/*.img >> forensics_output/2_super_structure.txt || true
+            echo "ERROR: Could not find greeshan.img or super.img anywhere in archive." >> forensics_output/2_super_structure.txt
           fi
 
       - name: "📂 Extract EROFS Partitions (Product & System)"
         run: |
-          mkdir -p tree/product tree/system
-          PRODUCT_IMG=$(find super_unpacked rom_extracted -iname "product*.img" | head -1)
-          SYSTEM_IMG=$(find super_unpacked rom_extracted -iname "system*.img" | head -1)
+          mkdir -p tree/product tree/system tree/system_ext tree/mi_ext
+          
+          # Extract logical images directly
+          PRODUCT_IMG=$(find super_unpacked -iname "product*.img" | head -1)
+          SYSTEM_IMG=$(find super_unpacked -iname "system*.img" -not -iname "system_ext*" | head -1)
+          SYSTEM_EXT_IMG=$(find super_unpacked -iname "system_ext*.img" | head -1)
           
           if [ -n "$PRODUCT_IMG" ]; then
             sudo fsck.erofs --extract=tree/product "$PRODUCT_IMG" || true
@@ -85,23 +88,27 @@ jobs:
           if [ -n "$SYSTEM_IMG" ]; then
             sudo fsck.erofs --extract=tree/system "$SYSTEM_IMG" || true
           fi
+          if [ -n "$SYSTEM_EXT_IMG" ]; then
+            sudo fsck.erofs --extract=tree/system_ext "$SYSTEM_EXT_IMG" || true
+          fi
 
-      - name: "✨ Audit 3 - HyperOS 2 Features & Device Spoofing"
+      - name: "✨ Audit 3 - Real HyperOS 2 Feature Flags & Low RAM"
         run: |
-          echo "=== Device Features (air.xml) ===" > forensics_output/3_feature_flags.txt
-          AIR_XML=$(find tree/product -iname "air.xml" | head -1)
+          echo "=== Checking Device Features XML ===" > forensics_output/3_feature_flags.txt
+          AIR_XML=$(find tree -iname "air.xml" | head -1)
           if [ -n "$AIR_XML" ]; then
+            echo "Found air.xml at: $AIR_XML" >> forensics_output/3_feature_flags.txt
             grep -E "support_window_blur|support_new_control_center|is_low_end_device" "$AIR_XML" >> forensics_output/3_feature_flags.txt || true
           else
-            echo "air.xml not found." >> forensics_output/3_feature_flags.txt
+            echo "air.xml not found in extracted trees." >> forensics_output/3_feature_flags.txt
           fi
           
-          echo -e "\n=== Low RAM & Spoofing (build.prop) ===" >> forensics_output/3_feature_flags.txt
-          find tree -iname "build.prop" -exec grep -H -E "low_ram|ro.product.model|ro.product.device|ro.product.name" {} \; >> forensics_output/3_feature_flags.txt || true
+          echo -e "\n=== Low RAM & Device Properties ===" >> forensics_output/3_feature_flags.txt
+          find tree -iname "*build.prop" -exec grep -H -E "low_ram|ro.product.model|ro.product.device|ro.product.name" {} + >> forensics_output/3_feature_flags.txt || true
 
-      - name: "🧹 Audit 4 - Debloat Verification"
+      - name: "🧹 Audit 4 - Verified Debloat Audit"
         run: |
-          echo "=== Bloatware Presence Check ===" > forensics_output/4_debloat_status.txt
+          echo "=== Verified Debloat Audit ===" > forensics_output/4_debloat_status.txt
           BLOAT_LIST=(
             "tree/product/app/MSA-Global"
             "tree/product/app/AnalyticsCore"
@@ -110,19 +117,22 @@ jobs:
             "tree/product/priv-app/facebook-services"
             "tree/product/app/cit"
             "tree/product/app/YTMusic"
+            "tree/system_ext/app/MiSightService"
+            "tree/product/app/Drive"
+            "tree/product/app/Meet"
           )
           
           for bloat in "${BLOAT_LIST[@]}"; do
             if [ -d "$bloat" ]; then
-              echo "[FAIL] Bloatware Found: $(basename "$bloat")" >> forensics_output/4_debloat_status.txt
+              echo "[FAIL - STILL PRESENT] $bloat" >> forensics_output/4_debloat_status.txt
             else
-              echo "[PASS] Cleaned: $(basename "$bloat")" >> forensics_output/4_debloat_status.txt
+              echo "[PASS - DEBLOATED] $bloat" >> forensics_output/4_debloat_status.txt
             fi
           done
 
       - name: "📦 Upload Audit Reports"
         uses: actions/upload-artifact@v4
         with:
-          name: ROM-Deep-Audit-Reports
+          name: ROM-Deep-Audit-Reports-Fixed
           path: forensics_output/*
           retention-days: 3
