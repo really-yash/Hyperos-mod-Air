@@ -55,17 +55,17 @@ jobs:
       - name: Search for App Vault package (broad)
         run: |
           echo "===== grep AndroidManifest for personalassistant / appvault package strings ====="
-          grep -rl "personalassistant" tree --include="AndroidManifest.xml" 2>/dev/null
-          grep -rl "appvault" tree -il 2>/dev/null | head -30
+          grep -rl "personalassistant" tree --include="AndroidManifest.xml" 2>/dev/null || true
+          grep -rl "appvault" tree -il 2>/dev/null | head -30 || true
           echo "===== Any folder with 'assistant' or 'vault' in the name ====="
-          find tree -iname "*assistant*"
-          find tree -iname "*vault*"
+          find tree -iname "*assistant*" || true
+          find tree -iname "*vault*" || true
           echo "===== Any folder with 'Global' suffix in mi_ext/product priv-app (Xiaomi naming pattern) ====="
-          find tree/mi_ext -maxdepth 3 -type d -iname "priv-app" -exec ls -la {} \; 2>/dev/null
+          find tree/mi_ext -maxdepth 3 -type d -iname "priv-app" -exec ls -la {} \; 2>/dev/null || true
 
       - name: Full priv-app + app listing for manual review
         run: |
           for part in system system_ext product vendor mi_ext; do
             echo "===== $part/app + priv-app full listing ====="
-            find "tree/$part" -maxdepth 3 -type d \( -iname "app" -o -iname "priv-app" \) -exec find {} -maxdepth 1 -mindepth 1 -type d \;
+            find "tree/$part" -maxdepth 3 -type d \( -iname "app" -o -iname "priv-app" \) -exec find {} -maxdepth 1 -mindepth 1 -type d \; || true
           done
