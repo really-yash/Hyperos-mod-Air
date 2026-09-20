@@ -1,4 +1,4 @@
-name: Recon HyperOS air - Theme AOD ControlCenter
+name: Recon HyperOS air - Low RAM Control Center
 
 on:
   workflow_dispatch:
@@ -23,7 +23,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y erofs-utils wget tar android-sdk-libsparse-utils
-          # Your tool links are perfect and up-to-date! ✨
           wget -q https://raw.githubusercontent.com/Exynos-nibba/lpunpack-lpmake-mirror/d0f9da322b764871e54072d1b3e9d67c09cd715c/binary/lpunpack -O lpunpack
           chmod +x lpunpack
           sudo mv lpunpack /usr/local/bin/
@@ -56,23 +55,20 @@ jobs:
             fi
           done
 
-      - name: Locate Theme Manager
+      - name: Search for low_ram / memory class flags
         run: |
-          echo "===== ThemeManager folder ====="
-          find tree -iname "*ThemeManager*" || true
-          find tree -iname "privapp_whitelist_com.android.thememanager*" || true
+          echo "===== build.prop low_ram / memory props ====="
+          grep -rn "low_ram\|lowmem\|ro.config.low_ram\|blur" tree/system/build.prop tree/product/build.prop tree/system_ext/etc/build.prop 2>/dev/null || true
+          find tree -iname "build.prop" -exec grep -Hn "low_ram\|lowmem" {} \; 2>/dev/null || true
 
-      - name: Locate AOD
-        run: |
-          echo "===== AOD folder ====="
-          find tree -iname "*Aod*" -o -iname "*aod*" || true
-          find tree -iname "privapp_whitelist_com.miui.aod*" || true
+          echo "===== ActivityManager memory class thresholds ====="
+          grep -rn "config_bigMemoryClass\|config_lowMemoryClass\|config_lowRamDeviceThreshold" tree --include="*.xml" 2>/dev/null || true
 
-      - name: Locate SystemUI / Control Center plugin host
+          echo "===== SystemUI blur-related config flags ====="
+          grep -rln "isLowRamDevice\|SUPPORT_BLUR\|blur_supported\|config_enableBlur" tree/system_ext/priv-app/MiuiSystemUI 2>/dev/null || true
+
+      - name: Dump SystemUI resources for blur config
         run: |
-          echo "===== SystemUI folder (plugin host app) ====="
-          # Fixed the -maxdepth syntax error! 🛠️
-          find tree -maxdepth 6 -iname "*SystemUI*" || true
-          find tree -iname "*SystemUIPlugin*" || true
-          echo "===== Any existing plugin overlay dirs ====="
-          find tree -path "*overlay*Plugin*" || true
+          mkdir -p sysui_apktool
+          echo "APK location for reference (not yet decompiled):"
+          find tree -iname "MiuiSystemUI.apk" || true
