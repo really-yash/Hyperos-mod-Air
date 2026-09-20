@@ -2,9 +2,12 @@ name: 🕵️ Greeshan HyperOS 2 Deep Audit
 
 on:
   workflow_dispatch:
-
-env:
-  TARGET_ROM_URL: "https://twds.dl.sourceforge.net/project/miui-greeshan-repack/HyperOS2/Redmi-13C-air/greeshan.by_Redmi13C_5G_air_OS2.0.208.0.VGQINXM_15.0_99c03.zip?viasf=1&fid=bba7bac78e4b3a4d&e=1789971541&st=eio601OlY6T3awo-shhorQ"
+    inputs:
+      rom_url:
+        description: 'Target ROM URL'
+        required: true
+        # Cleaned SourceForge URL (No IP locks or session tokens!)
+        default: 'https://downloads.sourceforge.net/project/miui-greeshan-repack/HyperOS2/Redmi-13C-air/greeshan.by_Redmi13C_5G_air_OS2.0.208.0.VGQINXM_15.0_99c03.zip'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,16 +24,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y erofs-utils wget unzip android-sdk-libsparse-utils file
           
+          # Dropped lpdump. We will rely on lpunpack and manual math!
           BASE_URL="https://raw.githubusercontent.com/Exynos-nibba/lpunpack-lpmake-mirror/d0f9da322b764871e54072d1b3e9d67c09cd715c/binary"
           wget -q $BASE_URL/lpunpack -O lpunpack
-          wget -q $BASE_URL/lpdump -O lpdump
-          chmod +x lpunpack lpdump
-          sudo mv lpunpack lpdump /usr/local/bin/
+          chmod +x lpunpack
+          sudo mv lpunpack /usr/local/bin/
 
       - name: "📥 Download & Unpack Target ROM"
         run: |
           mkdir -p rom_extracted forensics_output
-          wget -q --show-progress -O target_rom.zip "$TARGET_ROM_URL"
+          # Added --trust-server-names and --max-redirect to safely handle SourceForge CDN routing
+          wget -q --show-progress --trust-server-names --max-redirect=10 -O target_rom.zip "${{ github.event.inputs.rom_url }}"
           unzip -q target_rom.zip -d rom_extracted || true
 
       - name: "📜 Audit 1 - Flash Scripts & Fastboot Logic"
@@ -55,13 +59,15 @@ jobs:
               SUPER_TARGET="$SUPER"
             fi
             
-            lpdump "$SUPER_TARGET" >> forensics_output/2_super_structure.txt || true
-            
+            # Since we dropped lpdump, we directly unpack and measure the logical partitions
             mkdir -p super_unpacked
             lpunpack "$SUPER_TARGET" super_unpacked || true
             
-            echo -e "\n=== Extracted Logical Image Sizes ===" >> forensics_output/2_super_structure.txt
+            echo -e "\n=== Extracted Logical Image Sizes (Bytes) ===" >> forensics_output/2_super_structure.txt
             ls -lh super_unpacked/*.img >> forensics_output/2_super_structure.txt || true
+            
+            echo -e "\n=== Total Logical Blueprint Size ===" >> forensics_output/2_super_structure.txt
+            du -ch super_unpacked/*.img | grep total >> forensics_output/2_super_structure.txt || true
           else
             echo "No super.img found directly. Checking top-level images..." >> forensics_output/2_super_structure.txt
             ls -lh rom_extracted/*.img >> forensics_output/2_super_structure.txt || true
