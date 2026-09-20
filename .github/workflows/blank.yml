@@ -13,10 +13,10 @@ concurrency:
 
 jobs:
   forensics:
-    name: BSP Forensic Analysis
+    name: "BSP Forensic Analysis"
     runs-on: ubuntu-24.04
     steps:
-      - name: 🧹 Clean Environment & Install Tools
+      - name: "🧹 Clean Environment & Install Tools"
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get update
@@ -25,7 +25,7 @@ jobs:
           chmod +x lpunpack
           sudo mv lpunpack /usr/local/bin/
 
-      - name: 📥 Fetch & Extract Stock ROM
+      - name: "📥 Fetch & Extract Stock ROM"
         run: |
           wget -q -O rom.tgz "$ROM_URL"
           mkdir -p rom_extracted super_unpacked
@@ -39,26 +39,25 @@ jobs:
             SUPER_RAW="$SUPER"
           fi
           
-          # Unpack logical partitions
           lpunpack "$SUPER_RAW" super_unpacked
 
-      - name: 📊 Blueprint 1: Logical Partition Sizing & EROFS Superblock
+      - name: "📊 Blueprint 1 - Logical Partition Sizing & EROFS Superblock"
         run: |
           mkdir -p forensics_output
           echo "=== Logical Partition Raw Sizes ===" > forensics_output/partition_sizes.txt
-          ls -la super_unpacked/*_a.img >> forensics_output/partition_sizes.txt
+          ls -la super_unpacked/*_a.img >> forensics_output/partition_sizes.txt || true
           
           echo "=== EROFS Compression Format ===" > forensics_output/erofs_format.txt
           dump.erofs super_unpacked/system_a.img | grep -i "compression" >> forensics_output/erofs_format.txt || true
           dump.erofs super_unpacked/product_a.img | grep -i "compression" >> forensics_output/erofs_format.txt || true
 
-      - name: 📂 Extract Targets (As Root for UID accuracy)
+      - name: "📂 Extract Targets (As Root for UID accuracy)"
         run: |
           mkdir -p tree/system tree/product tree/mi_ext
-          sudo fsck.erofs --extract=tree/system $(find super_unpacked -iname "system_a.img" | head -1)
-          sudo fsck.erofs --extract=tree/product $(find super_unpacked -iname "product_a.img" | head -1)
+          sudo fsck.erofs --extract=tree/system $(find super_unpacked -iname "system_a.img" | head -1) || true
+          sudo fsck.erofs --extract=tree/product $(find super_unpacked -iname "product_a.img" | head -1) || true
 
-      - name: 🔐 Blueprint 2: SELinux Contexts & Permissions
+      - name: "🔐 Blueprint 2 - SELinux Contexts & Permissions"
         run: |
           echo "=== SELinux Context Map ===" > forensics_output/selinux_contexts.txt
           
@@ -79,7 +78,7 @@ jobs:
             fi
           done
 
-      - name: 📄 Blueprint 3: XML Encoding (Text vs Binary)
+      - name: "📄 Blueprint 3 - XML Encoding (Text vs Binary)"
         run: |
           echo "=== XML Format Check ===" > forensics_output/xml_encoding.txt
           find tree -iname "air.xml" -type f | while read xml; do
@@ -87,15 +86,15 @@ jobs:
             file "$xml" >> forensics_output/xml_encoding.txt
           done
 
-      - name: 🧠 Blueprint 4: Services.jar Architecture
+      - name: "🧠 Blueprint 4 - Services.jar Architecture"
         run: |
           echo "=== services.jar Structure ===" > forensics_output/services_structure.txt
           mkdir -p /tmp/services_unpack
-          sudo cp tree/system/system/framework/services.jar /tmp/services_unpack/
+          sudo cp tree/system/system/framework/services.jar /tmp/services_unpack/ || true
           cd /tmp/services_unpack
           unzip -l services.jar | grep ".dex" >> $GITHUB_WORKSPACE/forensics_output/services_structure.txt || true
 
-      - name: 🏗️ Blueprint 5: Kashi Mod Analysis
+      - name: "🏗️ Blueprint 5 - Kashi Mod Analysis"
         run: |
           mkdir -p /tmp/kashi_mod
           wget -q -O launcher.zip "$KASHI_LAUNCHER_URL"
@@ -103,7 +102,7 @@ jobs:
           echo "=== Kashi customize.sh ===" > forensics_output/kashi_script.txt
           cat /tmp/kashi_mod/customize.sh >> forensics_output/kashi_script.txt || true
 
-      - name: 📦 Upload Forensics Data
+      - name: "📦 Upload Forensics Data"
         uses: actions/upload-artifact@v4
         with:
           name: Air-ROM-Blueprints
