@@ -1,110 +1,122 @@
-name: 🛠️ Phase 1 - ROM Forensics & Blueprinting
+name: 🕵️ Greeshan HyperOS 2 Deep Audit
 
 on:
   workflow_dispatch:
 
 env:
-  ROM_URL: "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS2.0.208.0.VGQINXM/air_in_global_images_OS2.0.208.0.VGQINXM_20260804.0000.00_15.0_in_35b733efaa.tgz"
-  KASHI_LAUNCHER_URL: "https://github.com/Mods-Center/HyperOS-Launcher/releases/download/V6.2/HyperOS_LauncherV6.2%40kashis_cringey_stuffs.zip"
+  TARGET_ROM_URL: "https://twds.dl.sourceforge.net/project/miui-greeshan-repack/HyperOS2/Redmi-13C-air/greeshan.by_Redmi13C_5G_air_OS2.0.208.0.VGQINXM_15.0_99c03.zip?viasf=1&fid=bba7bac78e4b3a4d&e=1789971541&st=eio601OlY6T3awo-shhorQ"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  forensics:
-    name: "BSP Forensic Analysis"
+  forensics_lab:
+    name: "Deep Architecture Audit"
     runs-on: ubuntu-24.04
     steps:
       - name: "🧹 Clean Environment & Install Tools"
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get update
-          sudo apt-get install -y erofs-utils wget tar unzip android-sdk-libsparse-utils attr file
-          wget -q https://raw.githubusercontent.com/Exynos-nibba/lpunpack-lpmake-mirror/d0f9da322b764871e54072d1b3e9d67c09cd715c/binary/lpunpack -O lpunpack
-          chmod +x lpunpack
-          sudo mv lpunpack /usr/local/bin/
-
-      - name: "📥 Fetch & Extract Stock ROM"
-        run: |
-          wget -q -O rom.tgz "$ROM_URL"
-          mkdir -p rom_extracted super_unpacked
-          tar -xf rom.tgz -C rom_extracted
+          sudo apt-get install -y erofs-utils wget unzip android-sdk-libsparse-utils file
           
-          SUPER=$(find rom_extracted -iname "super.img" | head -1)
-          if file "$SUPER" | grep -qi "sparse"; then
-            simg2img "$SUPER" super_raw.img
-            SUPER_RAW="super_raw.img"
+          BASE_URL="https://raw.githubusercontent.com/Exynos-nibba/lpunpack-lpmake-mirror/d0f9da322b764871e54072d1b3e9d67c09cd715c/binary"
+          wget -q $BASE_URL/lpunpack -O lpunpack
+          wget -q $BASE_URL/lpdump -O lpdump
+          chmod +x lpunpack lpdump
+          sudo mv lpunpack lpdump /usr/local/bin/
+
+      - name: "📥 Download & Unpack Target ROM"
+        run: |
+          mkdir -p rom_extracted forensics_output
+          wget -q --show-progress -O target_rom.zip "$TARGET_ROM_URL"
+          unzip -q target_rom.zip -d rom_extracted || true
+
+      - name: "📜 Audit 1 - Flash Scripts & Fastboot Logic"
+        run: |
+          echo "=== Batch & Shell Scripts ===" > forensics_output/1_flash_scripts.txt
+          find rom_extracted -iname "*.bat" -o -iname "*.sh" -o -iname "*.cmd" | while read script; do
+            echo "--- File: $(basename "$script") ---" >> forensics_output/1_flash_scripts.txt
+            cat "$script" >> forensics_output/1_flash_scripts.txt
+            echo -e "\n\n" >> forensics_output/1_flash_scripts.txt
+          done
+
+      - name: "🔥 Audit 2 - Super Structure & Logical Boundaries"
+        run: |
+          echo "=== Super Metadata & Partition Sizes ===" > forensics_output/2_super_structure.txt
+          SUPER=$(find rom_extracted -iname "super*.img" | head -1)
+          
+          if [ -n "$SUPER" ]; then
+            if file "$SUPER" | grep -qi "sparse"; then
+              simg2img "$SUPER" super_raw.img
+              SUPER_TARGET="super_raw.img"
+            else
+              SUPER_TARGET="$SUPER"
+            fi
+            
+            lpdump "$SUPER_TARGET" >> forensics_output/2_super_structure.txt || true
+            
+            mkdir -p super_unpacked
+            lpunpack "$SUPER_TARGET" super_unpacked || true
+            
+            echo -e "\n=== Extracted Logical Image Sizes ===" >> forensics_output/2_super_structure.txt
+            ls -lh super_unpacked/*.img >> forensics_output/2_super_structure.txt || true
           else
-            SUPER_RAW="$SUPER"
+            echo "No super.img found directly. Checking top-level images..." >> forensics_output/2_super_structure.txt
+            ls -lh rom_extracted/*.img >> forensics_output/2_super_structure.txt || true
+          fi
+
+      - name: "📂 Extract EROFS Partitions (Product & System)"
+        run: |
+          mkdir -p tree/product tree/system
+          PRODUCT_IMG=$(find super_unpacked rom_extracted -iname "product*.img" | head -1)
+          SYSTEM_IMG=$(find super_unpacked rom_extracted -iname "system*.img" | head -1)
+          
+          if [ -n "$PRODUCT_IMG" ]; then
+            sudo fsck.erofs --extract=tree/product "$PRODUCT_IMG" || true
+          fi
+          if [ -n "$SYSTEM_IMG" ]; then
+            sudo fsck.erofs --extract=tree/system "$SYSTEM_IMG" || true
+          fi
+
+      - name: "✨ Audit 3 - HyperOS 2 Features & Device Spoofing"
+        run: |
+          echo "=== Device Features (air.xml) ===" > forensics_output/3_feature_flags.txt
+          AIR_XML=$(find tree/product -iname "air.xml" | head -1)
+          if [ -n "$AIR_XML" ]; then
+            grep -E "support_window_blur|support_new_control_center|is_low_end_device" "$AIR_XML" >> forensics_output/3_feature_flags.txt || true
+          else
+            echo "air.xml not found." >> forensics_output/3_feature_flags.txt
           fi
           
-          lpunpack "$SUPER_RAW" super_unpacked
+          echo -e "\n=== Low RAM & Spoofing (build.prop) ===" >> forensics_output/3_feature_flags.txt
+          find tree -iname "build.prop" -exec grep -H -E "low_ram|ro.product.model|ro.product.device|ro.product.name" {} \; >> forensics_output/3_feature_flags.txt || true
 
-      - name: "📊 Blueprint 1 - Logical Partition Sizing & EROFS Superblock"
+      - name: "🧹 Audit 4 - Debloat Verification"
         run: |
-          mkdir -p forensics_output
-          echo "=== Logical Partition Raw Sizes ===" > forensics_output/partition_sizes.txt
-          ls -la super_unpacked/*_a.img >> forensics_output/partition_sizes.txt || true
-          
-          echo "=== EROFS Compression Format ===" > forensics_output/erofs_format.txt
-          dump.erofs super_unpacked/system_a.img | grep -i "compression" >> forensics_output/erofs_format.txt || true
-          dump.erofs super_unpacked/product_a.img | grep -i "compression" >> forensics_output/erofs_format.txt || true
-
-      - name: "📂 Extract Targets (As Root for UID accuracy)"
-        run: |
-          mkdir -p tree/system tree/product tree/mi_ext
-          sudo fsck.erofs --extract=tree/system $(find super_unpacked -iname "system_a.img" | head -1) || true
-          sudo fsck.erofs --extract=tree/product $(find super_unpacked -iname "product_a.img" | head -1) || true
-
-      - name: "🔐 Blueprint 2 - SELinux Contexts & Permissions"
-        run: |
-          echo "=== SELinux Context Map ===" > forensics_output/selinux_contexts.txt
-          
-          echo "--- Locating Context Manifests ---" >> forensics_output/selinux_contexts.txt
-          find rom_extracted super_unpacked -iname "*file_contexts*" >> forensics_output/selinux_contexts.txt || true
-          find tree/system -iname "*file_contexts*" >> forensics_output/selinux_contexts.txt || true
-          
-          echo "--- Stock App Original Contexts ---" >> forensics_output/selinux_contexts.txt
-          TARGETS=(
-            "tree/product/priv-app/MiuiHome/MiuiHome.apk"
-            "tree/product/priv-app/MIUISecurityCenterGlobal/MIUISecurityCenterGlobal.apk"
+          echo "=== Bloatware Presence Check ===" > forensics_output/4_debloat_status.txt
+          BLOAT_LIST=(
+            "tree/product/app/MSA-Global"
+            "tree/product/app/AnalyticsCore"
+            "tree/product/app/facebook-appmanager"
+            "tree/product/priv-app/facebook-installer"
+            "tree/product/priv-app/facebook-services"
+            "tree/product/app/cit"
+            "tree/product/app/YTMusic"
           )
-          for t in "${TARGETS[@]}"; do
-            if [ -f "$t" ]; then
-              echo "File: $t" >> forensics_output/selinux_contexts.txt
-              ls -la "$t" >> forensics_output/selinux_contexts.txt
-              sudo getfattr -d -m - "$t" 2>&1 >> forensics_output/selinux_contexts.txt
+          
+          for bloat in "${BLOAT_LIST[@]}"; do
+            if [ -d "$bloat" ]; then
+              echo "[FAIL] Bloatware Found: $(basename "$bloat")" >> forensics_output/4_debloat_status.txt
+            else
+              echo "[PASS] Cleaned: $(basename "$bloat")" >> forensics_output/4_debloat_status.txt
             fi
           done
 
-      - name: "📄 Blueprint 3 - XML Encoding (Text vs Binary)"
-        run: |
-          echo "=== XML Format Check ===" > forensics_output/xml_encoding.txt
-          find tree -iname "air.xml" -type f | while read xml; do
-            echo "Checking: $xml" >> forensics_output/xml_encoding.txt
-            file "$xml" >> forensics_output/xml_encoding.txt
-          done
-
-      - name: "🧠 Blueprint 4 - Services.jar Architecture"
-        run: |
-          echo "=== services.jar Structure ===" > forensics_output/services_structure.txt
-          mkdir -p /tmp/services_unpack
-          sudo cp tree/system/system/framework/services.jar /tmp/services_unpack/ || true
-          cd /tmp/services_unpack
-          unzip -l services.jar | grep ".dex" >> $GITHUB_WORKSPACE/forensics_output/services_structure.txt || true
-
-      - name: "🏗️ Blueprint 5 - Kashi Mod Analysis"
-        run: |
-          mkdir -p /tmp/kashi_mod
-          wget -q -O launcher.zip "$KASHI_LAUNCHER_URL"
-          unzip -q launcher.zip -d /tmp/kashi_mod
-          echo "=== Kashi customize.sh ===" > forensics_output/kashi_script.txt
-          cat /tmp/kashi_mod/customize.sh >> forensics_output/kashi_script.txt || true
-
-      - name: "📦 Upload Forensics Data"
+      - name: "📦 Upload Audit Reports"
         uses: actions/upload-artifact@v4
         with:
-          name: Air-ROM-Blueprints
+          name: ROM-Deep-Audit-Reports
           path: forensics_output/*
-          retention-days: 1
+          retention-days: 3
