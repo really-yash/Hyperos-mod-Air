@@ -1,4 +1,4 @@
-name: 🌸 Recon HyperOS air - SELinux and ownership check UwU 🌸
+name: 🌸 Decompile SystemUI - find low RAM check UwU 🌸
 
 on:
   workflow_dispatch:
@@ -12,21 +12,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  uwu_recon:
-    name: (✿◠‿◠) SELinux & Ownership Job
+  decompile:
+    name: (✿◠‿◠) Smali Decompile Job
     runs-on: ubuntu-24.04
     steps:
       - name: 🧹 (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧ Sweeping disk space OwO
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
 
       - name: 🛠️ ʕ•ᴥ•ʔ Getting our shiny tools ready UwU
         run: |
           sudo apt-get update
-          sudo apt-get install -y erofs-utils wget tar android-sdk-libsparse-utils attr
+          sudo apt-get install -y erofs-utils wget tar android-sdk-libsparse-utils default-jdk
           wget -q https://raw.githubusercontent.com/Exynos-nibba/lpunpack-lpmake-mirror/d0f9da322b764871e54072d1b3e9d67c09cd715c/binary/lpunpack -O lpunpack
           chmod +x lpunpack
           sudo mv lpunpack /usr/local/bin/
+          
+          # Upgraded to the fast GitHub Releases link! 🚀
+          wget -q -O apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar
+          wget -q -O apktool https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool
+          chmod +x apktool
 
       - name: 📥 (๑>ᴗ<๑) Snatching the fastboot ROM!
         run: |
@@ -37,7 +41,7 @@ jobs:
       - name: ✨ (ᵘﻌᵘ) Unpacking super.img magic~
         run: |
           SUPER=$(find rom_extracted -iname "super.img" | head -1)
-          mkdir -p super_unpacked
+          mkdir -p super_unpacked tree/system_ext
           if file "$SUPER" | grep -qi "sparse"; then
             simg2img "$SUPER" super_raw.img
             SUPER_RAW="super_raw.img"
@@ -45,45 +49,40 @@ jobs:
             SUPER_RAW="$SUPER"
           fi
           lpunpack "$SUPER_RAW" super_unpacked
-
-      - name: 📂 ٩(◕‿◕｡)۶ Extracting EROFS partitions AS ROOT
-        run: |
-          mkdir -p tree/product
-          # Separated the find command to prevent syntax errors if product_a.img is missing
-          PRODUCT_IMG=$(find super_unpacked -iname "product_a.img" | head -1)
-          if [ -n "$PRODUCT_IMG" ]; then
-            sudo fsck.erofs --extract=tree/product "$PRODUCT_IMG"
-          else
-            echo "product_a.img not found! (｡•́︿•̀｡)"
-          fi
-
-      - name: 🕵️ (⌐■_■) Check who we are
-        run: id
-
-      - name: 🔍 (O_O) Check original file attributes (before any replacement)
-        run: |
-          TARGET="tree/product/priv-app/MiuiHome/MiuiHome.apk"
-          echo "===== ls -la ====="
-          ls -la "$TARGET" || true
-          echo "===== getfattr (selinux context) ====="
-          sudo getfattr -d -m - "$TARGET" 2>&1 || true
-
-      - name: 🔄 (◠‿◠✿) Simulate a plain cp and re-check attributes
-        run: |
-          TARGET="tree/product/priv-app/MiuiHome/MiuiHome.apk"
           
-          # Using sudo cp because fsck.erofs extracted files as root!
-          sudo cp "$TARGET" /tmp/backup_original.apk || true
-          sudo cp /tmp/backup_original.apk "$TARGET" || true
-          
-          echo "===== AFTER plain cp overwrite ====="
-          ls -la "$TARGET" || true
-          sudo getfattr -d -m - "$TARGET" 2>&1 || true
+          # Safe extraction logic
+          SYS_EXT_IMG=$(find super_unpacked -iname "system_ext_a.img" -o -iname "system_ext.img" | head -1)
+          sudo fsck.erofs --extract=tree/system_ext "$SYS_EXT_IMG"
 
-      - name: 📜 (^-^*) Check if file_contexts / fs_config manifest exists
+      - name: 🔓 (✧ω✧) Decompile MiuiSystemUI.apk (NO RES)
         run: |
-          echo "===== Checking rom_extracted ====="
-          find rom_extracted -iname "*file_contexts*" || true
-          find rom_extracted -iname "*fs_config*" || true
-          echo "===== Checking super_unpacked ====="
-          find super_unpacked -iname "*file_contexts*" || true
+          APK=$(find tree/system_ext -iname "MiuiSystemUI.apk" | head -1)
+          echo "Decompiling: $APK"
+          # Added -r to skip resources! Prevents the crash and makes it 10x faster! 🌸
+          java -jar apktool.jar d "$APK" -o decompiled_systemui -f -r
+
+      - name: 🔍 (O_O) Search for low_ram / blur decision logic in smali
+        run: |
+          echo "===== Searching for threshold_gb references ====="
+          grep -rln "low_ram" decompiled_systemui --include="*.smali" | head -20 || true
+
+          echo "===== Searching for isLowRamDevice calls ====="
+          grep -rln "isLowRamDevice" decompiled_systemui --include="*.smali" | head -20 || true
+
+          echo "===== Searching for blur-related class names ====="
+          find decompiled_systemui -iname "*Blur*.smali" || true
+
+          echo "===== Searching for ControlCenter/QS panel class names ====="
+          find decompiled_systemui -iname "*ControlCenter*.smali" || true
+          find decompiled_systemui -iname "*QSPanel*.smali" | head -10 || true
+
+      - name: 📦 (◠‿◠✿) Upload decompiled smali for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: systemui-smali-search-results
+          # Added warn flag just in case nothing is found so it doesn't crash
+          if-no-files-found: warn
+          path: |
+            decompiled_systemui/smali*/**/*Blur*
+            decompiled_systemui/smali*/**/*ControlCenter*
+          retention-days: 3
