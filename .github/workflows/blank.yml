@@ -4,8 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  ROM_URL: "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS2.0.208.0.VGQINXM/air_in_global_images_OS2.0.208.0.VGQINXM_20260804.0000.00_15.0_in_35b733efaa.tgz"
-
+  ROM_URL: "https://drive.google.com/file/d/1mRR3D_R-dkPk5EJ4IaxvXOSIaw81pV_u/view?usp=drivesdk"
 # This spell cancels hanging runs so your new job starts INSTANTLY ⚡
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
